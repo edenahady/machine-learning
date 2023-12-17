@@ -1,0 +1,268 @@
+---
+title: "Final Project"
+author: "Chen Bistra 318322492 Eden Ahady 318948106 Lynn Molga Nagar 319090965"
+output:
+  pdf_document: default
+---
+
+# Introduction
+NKI, consists of gene expression levels extracted from 272 tumors and is analyzed using about 1500 most varying genes
+we are using pre-cleaned data
+
+```{r, results='hide', message=FALSE, echo=FALSE}
+library(plyr)
+library(dplyr)
+library(stringr)
+library(gplots)
+library(ggplot2)
+library(forcats)
+library(data.table)
+library(reshape2)
+library(affycoretools)
+library(factoextra)
+library(ggvis)
+library(class)
+library(gmodels)
+library(plotly)
+library(C50)
+library(tidyverse)
+library(skimr)     
+library(ggthemes)
+library(patchwork)  
+library(GGally)     
+library(corrplot)
+library(psych)     
+library(factoextra) 
+library(regclass)
+library(fmsb)
+library(rpart.plot)
+library(e1071)
+library(plot.matrix)
+library(gmodels)
+library(plotly)
+library(tidymodels)
+library(rsample) 
+library(ranger)
+library(caret)
+library(kknn)
+```
+
+```{r}
+NKI_data<-read.csv("NKI_cleaned.csv")
+```
+this dataset has..
+we have taken out Patient and ID as they are not features, in addition we have taken out eventdeath, survival and timerecurrece as they are the lables.
+
+
+```{r}
+print(paste("number of NAs in dataset:",sum(is.na(NKI_data))))
+```
+
+```{r}
+# Histogram
+ggplot(NKI_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "lightblue", color = "black") +
+  labs(x = "Age", y = "Count") +
+  ggtitle("Distribution of Age")
+
+# Bar Plot
+ggplot(NKI_data, aes(x = histtype)) +
+  geom_bar(fill = "lightblue", color = "black") +
+  labs(x = "Histological Type", y = "Count", title = "Histological Type Distribution")
+
+```
+
+```{r}
+cleaned_data<-NKI_data[, c(3:4, 7:15)]
+
+library(ggcorrplot)
+cor_matrix <- cor(cleaned_data[-c(2)])
+ggcorrplot(cor_matrix, type = "lower", lab = TRUE)
+
+```
+VIF
+```{r}
+X<-cleaned_data[,-(ncol(cleaned_data))]
+print(paste("the VIF value of radius chemo is:",VIF(lm(chemo ~ .,data=X))))
+print(paste("the VIF value of texture posnodes is:",VIF(lm(posnodes ~ .,data=X))))
+```
+
+
+```{r}
+summary_df2 <- data.frame(
+  Treatment = c("chemo", "hormonal", "amputation"),
+  Alive = c(table(NKI_data$eventdeath[NKI_data$chemo == 1])[1],
+            table(NKI_data$eventdeath[NKI_data$hormonal == 1])[1],
+            table(NKI_data$eventdeath[NKI_data$amputation == 1])[1]),
+  
+  Dead = c(table(NKI_data$eventdeath[NKI_data$chemo == 1])[2],
+           table(NKI_data$eventdeath[NKI_data$hormonal == 1])[2],
+           table(NKI_data$eventdeath[NKI_data$amputation == 1])[2])
+)
+
+# Convert the Treatment column to a factor with desired order
+summary_df2$Treatment <- factor(summary_df2$Treatment, levels = c("chemo", "hormonal", "amputation"))
+
+# Reshape the data to a longer format
+summary_df2_long <- tidyr::gather(summary_df2, Status, Count, Alive:Dead)
+
+# Create the grouped bar plot
+ggplot(summary_df2_long, aes(x = Treatment, y = Count, fill = Status)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("Alive" = "green", "Dead" = "red")) +
+  labs(x = "Treatment", y = "Count", fill = "Status") +
+  ggtitle("Alive and Dead Counts by Treatment")
+```
+```{r, }
+# Calculate the average survival time for each grade
+NKI_data$grade <- factor(NKI_data$grade)
+avg_survival <- aggregate(survival ~ grade, data = NKI_data, FUN = mean)
+
+ggplot(data = avg_survival, aes(x = grade, y = survival)) +
+  geom_bar(stat = "identity", fill = "pink", width = 0.5) +
+  labs(title = "Average Survival Time by Cancer Grade", x = "Cancer Grade", y = "Average Survival Time (Years)")
+```
+
+# **Normalization:**
+
+We normalized by min-max and by Z-score, and wanted to check which one gave better results. 
+
+### Normalize the data by MIN/MAX:
+
+```{r}
+# create the min/max normalization function:
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+
+#normalize the data without the classification column
+minmax_data <- as.data.frame(lapply(cleaned_data, normalize))
+str(minmax_data)
+```
+### Normalize the data by z-score:
+
+
+```{r, message=FALSE, warning=FALSE}
+# z-score normalization
+zscore_data <- as.data.frame(scale(cleaned_data))
+str(zscore_data)
+```
+
+
+```{r, message=FALSE, warning=FALSE, fig.show='hold', out.width="50%", out.height="50%"}
+
+pca <- prcomp(minmax_data)
+
+
+pca_to_show <- data.frame(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  classification = as.factor(cleaned_data$eventdeath)
+)
+
+ggplot(pca_to_show, aes(x = PC1, y = PC2, col = classification)) +
+  geom_point()
+
+#fviz_pca_var(pca,
+#             col.var = "contrib", # Color by contributions to the PC
+#             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+#             repel = TRUE     # Avoid text overlapping
+#             )
+
+```
+With Z-Score normalization:
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, fig.show='hold', out.width="50%", out.height="50%"}
+
+pca <- prcomp(zscore_data)
+pca_to_show <- data.frame(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  classification = as.factor(cleaned_data$eventdeath)
+)
+
+ggplot(pca_to_show, aes(x = PC1, y = PC2, col = classification)) +
+  geom_point()
+
+#fviz_pca_var(pca,
+#             col.var = "contrib", # Color by contributions to the PC
+#             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+#             repel = TRUE     # Avoid text overlapping
+#             )
+```
+
+classification with tsne
+
+```{r}
+library(Rtsne)
+tsne <- Rtsne(minmax_data,
+  pca = FALSE, perplexity = 10,
+  theta = 0.0
+)
+
+tsne_to_show <- data.frame(
+  TSNE1 = tsne$Y[, 1],
+  TSNE2 = tsne$Y[, 2],
+  label=minmax_data$eventdeath,
+  classification = minmax_data$eventdeath
+)
+
+ggplot(tsne_to_show, aes(
+  x = TSNE1, y = TSNE2,
+   label = label, col=classification
+)) +
+  geom_point() +
+  ggrepel::geom_text_repel(cex = 2.5)
+```
+
+
+classification with umap
+```{r}
+library(uwot)
+umap_result <- umap(minmax_data,
+  n_neighbors = 15,
+  min_dist = 1, spread = 5
+)
+
+umap_to_plot <- data.frame(
+  UMAP1 = umap_result[, 1],
+  UMAP2 = umap_result[, 2],
+  label = minmax_data$eventdeath,
+  classification = minmax_data$eventdeath
+)
+
+ggplot(umap_to_plot, aes(
+  x = UMAP1, y = UMAP2,
+  label = label, col = classification
+)) +
+  geom_point() +
+  ggrepel::geom_text_repel(cex = 2.5)
+```
+
+```{r}
+set.seed(123)  # For reproducibility
+train_indices <- sample(1:nrow(NKI_data), 0.7 * nrow(NKI_data))  # 70% for training
+train_data <- NKI_data[train_indices, ]
+test_data <- NKI_data[-train_indices, ]
+
+# Select the predictor variables
+predictors <- c("age", "survival", "timerecurrence", "chemo", "hormonal", "amputation",
+                "histtype", "diam", "posnodes", "grade", "angioinv", "lymphinfil")
+
+# Train the k-NN model
+k <- 11 # Set the number of neighbors
+knn_model <- knn(train = train_data[, predictors],
+                 test = test_data[, predictors],
+                 cl = train_data$eventdeath,
+                 k = k)
+```
+
+```{r}
+knn_predictions <- knn_model
+
+# Create a confusion matrix
+confusion_matrix <- table(Actual = test_data$eventdeath, Predicted = knn_predictions)
+
+# Print the confusion matrix
+print(confusion_matrix)
+```
